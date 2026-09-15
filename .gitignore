@@ -1,0 +1,42 @@
+# Configuracoes locais e credenciais
+.env
+.env.*
+!.env.example
+!.env.*.example
+.aws/
+
+# Secrets Kubernetes locais
+k8s/*secret*.yaml
+!k8s/01-secrets.example.yaml
+
+# Terraform: cache, estado e planos
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Terraform: valores locais
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
+
+# Configuracao local do Terraform
+.terraformrc
+terraform.rc
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Arquivos auxiliares
+.agents/
+Thumbs.db
+.DS_Store
+POSTECH - Tech Challenge - Fase 2.pdf
+POSTECH - Tech Challenge - Fase 3.pdf

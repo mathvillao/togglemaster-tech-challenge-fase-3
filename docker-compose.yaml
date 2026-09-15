@@ -1,0 +1,143 @@
+services:
+  postgres-auth:
+    image: postgres:16-alpine
+    container_name: togglemaster-postgres-auth
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${AUTH_DB}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-auth-data:/var/lib/postgresql/data
+      - ./auth-service/db/init.sql:/docker-entrypoint-initdb.d/01-init-auth.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${AUTH_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-flags-targeting:
+    image: postgres:16-alpine
+    container_name: togglemaster-postgres-flags-targeting
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_SHARED_DB}"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-flags-targeting-data:/var/lib/postgresql/data
+      - ./docker/postgres-flags-targeting/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./flag-service/db/init.sql:/scripts/flag-init.sql:ro
+      - ./targeting-service/db/init.sql:/scripts/targeting-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_SHARED_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: togglemaster-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: togglemaster-dynamodb-local
+    command: "-jar DynamoDBLocal.jar -inMemory -sharedDb"
+    ports:
+      - "8000:8000"
+  
+  auth-service:
+    image: auth-service:latest
+    container_name: togglemaster-auth-service
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: "8001"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-auth:5432/${AUTH_DB}?sslmode=disable"
+      MASTER_KEY: "${MASTER_KEY}"
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+
+  flag-service:
+    image: flag-service:latest
+    container_name: togglemaster-flag-service
+    ports:
+      - "8002:8002"
+    environment:
+      PORT: "8002"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-flags-targeting:5432/${FLAGS_DB}?sslmode=disable"
+      AUTH_SERVICE_URL: "http://auth-service:8001"
+    depends_on:
+      postgres-flags-targeting:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+
+  targeting-service:
+    image: targeting-service:latest
+    container_name: togglemaster-targeting-service
+    ports:
+      - "8003:8003"
+    environment:
+      PORT: "8003"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-flags-targeting:5432/${TARGETING_DB}?sslmode=disable"
+      AUTH_SERVICE_URL: "http://auth-service:8001"
+    depends_on:
+      postgres-flags-targeting:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+  
+  evaluation-service:
+    image: evaluation-service:latest
+    container_name: togglemaster-evaluation-service
+    ports:
+      - "8004:8004"
+    environment:
+      PORT: "8004"
+      REDIS_URL: "redis://redis:6379"
+      FLAG_SERVICE_URL: "http://flag-service:8002"
+      TARGETING_SERVICE_URL: "http://targeting-service:8003"
+      SERVICE_API_KEY: "${SERVICE_API_KEY}"
+      AWS_REGION: "us-east-1"
+      AWS_SQS_URL: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+      flag-service:
+        condition: service_started
+      targeting-service:
+        condition: service_started
+
+  analytics-service:
+    image: analytics-service:latest
+    container_name: togglemaster-analytics-service
+    ports:
+      - "8005:8005"
+    environment:
+      PORT: "8005"
+      AWS_REGION: "us-east-1"
+      AWS_DYNAMODB_TABLE: "ToggleMasterAnalytics"
+      AWS_DYNAMODB_ENDPOINT_URL: "http://dynamodb-local:8000"
+      AWS_ACCESS_KEY_ID: "local"
+      AWS_SECRET_ACCESS_KEY: "local"
+      SQS_WORKER_ENABLED: "false"
+      AWS_SQS_URL: ""
+      CREATE_DYNAMODB_TABLE_IF_NOT_EXISTS: "true"
+    depends_on:
+      dynamodb-local:
+        condition: service_started
+
+volumes:
+  postgres-auth-data:
+  postgres-flags-targeting-data:
